@@ -33,6 +33,9 @@ package com.example.xiyou.twolearntodo.app.Launch;
         import java.io.FileOutputStream;
         import java.io.IOException;
         import java.io.InputStream;
+        import java.io.RandomAccessFile;
+        import java.nio.MappedByteBuffer;
+        import java.nio.channels.FileChannel;
 
 public class LaunchActivity extends Activity {
 
@@ -53,6 +56,8 @@ public class LaunchActivity extends Activity {
     private final int ERROR = 0x007;
 
     private final int START = 0x008;
+
+    private final int INTERRUPT = 0x009;
 
     private TextView progress;
     private ProgressBar progressBar;
@@ -135,7 +140,7 @@ public class LaunchActivity extends Activity {
                     /**
                      * 下载失败
                      */
-                    Toast.makeText(LaunchActivity.this, "网络连接出现问题, 下载失败", Toast.LENGTH_SHORT).show();
+                    Toast.makeText(LaunchActivity.this, "网络连接出现问题", Toast.LENGTH_SHORT).show();
                 case NEWEST :
                     /**
                      * 已是最新版本
@@ -159,6 +164,10 @@ public class LaunchActivity extends Activity {
                     intent.setClass(LaunchActivity.this, MainActivity.class);
                     startActivity(intent);
                     finish();
+                    break;
+                case INTERRUPT :
+                    progressBar.setProgress(currentProgress);
+                    Toast.makeText(LaunchActivity.this, "检测到之前的下载记录, 正在为您继续下载", Toast.LENGTH_SHORT).show();
                     break;
             }
         }
@@ -238,38 +247,60 @@ public class LaunchActivity extends Activity {
                     msg.what = DEFAULT;
                     handler.sendMessage(msg);
                 }
+            } else {
+                handler.sendEmptyMessage(ERROR);
             }
         } catch (IOException e) {
             Log.e("get versionInfo error", e.toString());
+            Message msg = handler.obtainMessage();
+            msg.what = ERROR;
+            handler.sendMessage(msg);
         } catch (JSONException e) {
             Log.e("json data error", e.toString());
+            Message msg = handler.obtainMessage();
+            msg.what = ERROR;
+            handler.sendMessage(msg);
         }
     }
 
     public void downloadApk(String url) {
+        long startPoint = 0;
         String rootPath = Environment.getExternalStorageDirectory() + "/";
+        File file = new File(rootPath + "/TwoLearnToDo/apk");
+        if (!file.exists()) {
+            file.mkdirs();
+        }
+        String fileName = url.substring(url.lastIndexOf("/") + 1);
+        File file1 = new File(file.getPath() + "/" + fileName);
+        filePath = file1.getAbsolutePath();
+        if(file1.exists()){
+            startPoint = file1.length();
+            currentProgress = (int)startPoint;
+            handler.sendEmptyMessage(INTERRUPT);
+        }
         OkHttpClient okHttpClient = new OkHttpClient();
-        Request request = new Request.Builder().url(url).build();
+        Request request = new Request.Builder().url(url).header("RANGE", "bytes=" + startPoint + "-").build();
+        InputStream is = null;
+        RandomAccessFile downloadFile = null;
+        FileChannel channelOut = null;
         try {
             Response response = okHttpClient.newCall(request).execute();
             Log.e("state--->", String.valueOf(response.code()));
-            if (response.code() == 200) {
-                File file = new File(rootPath + "/TwoLearnToDo/apk");
-                if (!file.exists()) {
-                    file.mkdirs();
-                }
-                String fileName = url.substring(url.lastIndexOf("/") + 1);
-                File file1 = new File(file.getPath() + "/" + fileName);
-                filePath = file1.getAbsolutePath();
-                if(file1.exists()){
-                    file1.delete();
-                }
-                InputStream is = response.body().byteStream();
-                FileOutputStream os = new FileOutputStream(filePath);
-                byte[] b = new byte[1024];
+            if (response.isSuccessful()) {
+                is = response.body().byteStream();
+                downloadFile = new RandomAccessFile(file1, "rw");
+                /**
+                 * Chanel NIO中的用法，由于RandomAccessFile没有使用缓存策略，直接使用会使得下载速度变慢，亲测缓存下载3.3秒的文件，用普通的RandomAccessFile需要20多秒。
+                 */
+                channelOut = downloadFile.getChannel();
+                /**
+                 * 内存映射，直接使用RandomAccessFile，是用其seek方法指定下载的起始位置，使用缓存下载，在这里指定下载位置。
+                 */
+                MappedByteBuffer mappedBuffer = channelOut.map(FileChannel.MapMode.READ_WRITE, startPoint, Long.parseLong(fileLength));
+                byte[] b = new byte[1024 * 100];
                 int c;
                 while ((c = is.read(b)) != -1) {
-                    os.write(b, 0, c);
+                    mappedBuffer.put(b, 0, c);
                     Message msg = handler.obtainMessage();
                     msg.what = PROGRESS;
                     currentProgress += c;
@@ -279,16 +310,35 @@ public class LaunchActivity extends Activity {
                     Log.e("currentProgress", currentProgress + "");
                 }
                 is.close();
-                os.close();
+                channelOut.close();
+                downloadFile.close();
+                Thread.sleep(1000);
                 Message msg = handler.obtainMessage();
                 msg.what = DONE;
                 handler.sendMessage(msg);
+            } else {
+                handler.sendEmptyMessage(ERROR);
             }
         } catch (IOException e) {
-            Log.e("get apk file error", e.toString());
+            Log.e("download apk file error", e.toString());
+            try {
+                if(is != null){
+                    is.close();
+                }
+                if(downloadFile != null){
+                    downloadFile.close();
+                }
+                if(channelOut != null){
+                    channelOut.close();
+                }
+            } catch (IOException q) {
+                Log.e("stream error", q.toString());
+            }
             Message msg = handler.obtainMessage();
             msg.what = ERROR;
             handler.sendMessage(msg);
+        } catch (InterruptedException e) {
+            e.printStackTrace();
         }
     }
 

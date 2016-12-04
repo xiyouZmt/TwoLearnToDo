@@ -2,7 +2,7 @@
 <project version="4">
   <component name="ProjectModuleManager">
     <modules>
-      <module fileurl="file://$PROJECT_DIR$/TwoLearnToDo-master-59e22fe9b05a643d704852f431bd3f78a17993ea.iml" filepath="$PROJECT_DIR$/TwoLearnToDo-master-59e22fe9b05a643d704852f431bd3f78a17993ea.iml" />
+      <module fileurl="file://$PROJECT_DIR$/TwoLearnToDo.iml" filepath="$PROJECT_DIR$/TwoLearnToDo.iml" />
       <module fileurl="file://$PROJECT_DIR$/app/app.iml" filepath="$PROJECT_DIR$/app/app.iml" />
     </modules>
   </component>
